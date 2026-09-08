@@ -12,6 +12,7 @@ const createSubscription = async (req, res) => {
             SELECT *
             FROM cooks
             WHERE id = $1
+            AND approved = true
             `,
       [cook_id],
     );
@@ -40,7 +41,20 @@ const createSubscription = async (req, res) => {
         message: "You already have an active subscription for this cook.",
       });
     }
-
+    const availablePlan = await pool.query(
+      `SELECT id, price, cuisine
+      FROM menus
+      WHERE cook_id = $1
+      AND meal_plan = $2
+      AND availability = true
+      LIMIT 1`,
+      [cook_id, plan_type],
+    );
+    if (availablePlan.rows.length === 0) {
+      return res.status(400).json({
+        message: `This cook does not currently offer a ${plan_type} meal plan.`,
+      });
+    }
     // Create subscription
     const subscription = await pool.query(
       `
@@ -95,23 +109,70 @@ const createSubscription = async (req, res) => {
 const getMySubscriptions = async (req, res) => {
   try {
     const userId = req.user.userId;
+
     const subscriptions = await pool.query(
-      `SELECT
-            subscriptions.*,
-            users.name,
-            cooks.service_area,
-            cooks.delivery_timings
-            FROM subscriptions
-            JOIN cooks
-            ON subscriptions.cook_id = cooks.id
-            JOIN users
-            ON cooks.user_id = users.id
-            WHERE subscriptions.user_id = $1;`,
+      `
+      SELECT
+        subscriptions.*,
+        users.name,
+        cooks.image_url,
+        cooks.service_area,
+        cooks.delivery_timings,
+
+        COALESCE(
+          plan_menu.price,
+          any_menu.price
+        ) AS price,
+
+        COALESCE(
+          plan_menu.cuisine,
+          any_menu.cuisine
+        ) AS cuisine
+
+      FROM subscriptions
+
+      JOIN cooks
+        ON subscriptions.cook_id = cooks.id
+
+      JOIN users
+        ON cooks.user_id = users.id
+
+      LEFT JOIN LATERAL (
+        SELECT
+          price,
+          cuisine
+        FROM menus
+        WHERE menus.cook_id = subscriptions.cook_id
+          AND menus.meal_plan = subscriptions.plan_type
+          AND menus.availability = true
+        ORDER BY menus.price ASC
+        LIMIT 1
+      ) plan_menu
+        ON true
+
+      LEFT JOIN LATERAL (
+        SELECT
+          price,
+          cuisine
+        FROM menus
+        WHERE menus.cook_id = subscriptions.cook_id
+          AND menus.availability = true
+        ORDER BY menus.price ASC
+        LIMIT 1
+      ) any_menu
+        ON true
+
+      WHERE subscriptions.user_id = $1
+
+      ORDER BY subscriptions.created_at DESC
+      `,
       [userId],
     );
+
     res.status(200).json(subscriptions.rows);
   } catch (error) {
-    console.log(error);
+    console.log("Get My Subscriptions Error:", error);
+
     res.status(500).json({
       message: "Server Error",
     });
@@ -121,37 +182,81 @@ const cancelSubscription = async (req, res) => {
   try {
     const subscriptionId = req.params.id;
     const userId = req.user.userId;
+
     const subscription = await pool.query(
-      `SELECT * FROM 
-            subscriptions WHERE id = $1`,
+      `
+      SELECT *
+      FROM subscriptions
+      WHERE id = $1
+      `,
       [subscriptionId],
     );
+
     if (subscription.rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: "Subscription not found",
       });
     }
-    if (subscription.rows[0].user_id !== userId) {
+
+    const existingSubscription = subscription.rows[0];
+
+    // Make sure this subscription belongs to the logged-in customer
+    if (existingSubscription.user_id !== userId) {
       return res.status(403).json({
         success: false,
         message: "Unauthorized",
       });
     }
+
+    // Get cook's user ID
+    const cook = await pool.query(
+      `
+      SELECT user_id
+      FROM cooks
+      WHERE id = $1
+      `,
+      [existingSubscription.cook_id],
+    );
+    if (cook.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Cook not found",
+      });
+    }
+    const cookUserId = cook.rows[0].user_id;
+    // Cancel subscription
     const cancelled = await pool.query(
-      `UPDATE subscriptions
-            SET status = 'Cancelled'
-            WHERE id = $1
-            RETURNING *`,
+      `
+      UPDATE subscriptions
+      SET status = 'Cancelled'
+      WHERE id = $1
+      RETURNING *
+      `,
       [subscriptionId],
     );
+    const cancelledSubscription = cancelled.rows[0];
+    // Notify cook
+    await createNotification({
+      userId: cookUserId,
+      title: "Subscription Cancelled",
+      message: `A customer has cancelled their ${cancelledSubscription.plan_type} subscription.`,
+      type: "SUBSCRIPTION",
+      relatedId: cancelledSubscription.id,
+    });
+
     res.status(200).json({
+      success: true,
       message: "Subscription cancelled",
-      subscription: cancelled.rows[0],
+      subscription: cancelledSubscription,
     });
   } catch (error) {
-    console.log(error);
-    res.status(500).json({ message: "Server Error" });
+    console.log("Cancel Subscription Error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Server Error",
+    });
   }
 };
 const getCookSubscribers = async (req, res) => {

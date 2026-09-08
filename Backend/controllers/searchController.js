@@ -46,7 +46,7 @@ const getAllCooks = async (req, res) => {
         GROUP BY cook_id
       ) review_stats
         ON review_stats.cook_id = c.id
-
+      WHERE c.approved = true
       GROUP BY
         c.id,
         u.name,
@@ -201,7 +201,7 @@ const filterCooks = async (req, res) => {
         GROUP BY cook_id
       ) review_stats
         ON review_stats.cook_id = c.id
-      WHERE 1 = 1
+      WHERE c.approved = true
     `;
     const values = [];
     if (search) {
@@ -211,6 +211,7 @@ const filterCooks = async (req, res) => {
           LOWER(u.name) LIKE LOWER($${values.length})
           OR LOWER(c.bio) LIKE LOWER($${values.length})
           OR LOWER(c.service_area) LIKE LOWER($${values.length})
+          OR LOWER(m.cuisine) LIKE LOWER($${values.length})
         )
       `;
     }

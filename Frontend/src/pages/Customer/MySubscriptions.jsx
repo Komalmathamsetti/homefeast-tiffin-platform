@@ -1,9 +1,15 @@
 import { useEffect, useState } from "react";
-import { useNavigate,Link } from "react-router-dom";
-import { getMySubscriptions,cancelSubscription} from "../../services/subscriptionServices";
+import { useNavigate, Link } from "react-router-dom";
+import {
+  getMySubscriptions,
+  cancelSubscription,
+} from "../../services/subscriptionServices";
+import Swal from "sweetalert2";
+import { getImageUrl } from "../../utils/imageUrl";
 const statusStyles = {
   pending: "bg-yellow-100 text-yellow-700 ring-yellow-200",
   active: "bg-green-100 text-green-700 ring-green-200",
+  rejected: "bg-red-100 text-red-700 ring-red-200",
   cancelled: "bg-red-100 text-red-700 ring-red-200",
   expired: "bg-gray-100 text-gray-600 ring-gray-200",
 };
@@ -11,6 +17,7 @@ const statusStyles = {
 const statusLabels = {
   pending: "Pending",
   active: "Active",
+  rejected: "Rejected",
   cancelled: "Cancelled",
   expired: "Expired",
 };
@@ -55,9 +62,10 @@ function SkeletonCard() {
   );
 }
 
-export function SubscriptionCard({ subscription,onCancel }) {
+export function SubscriptionCard({ subscription, onCancel }) {
   const isActive = subscription.status === "active";
   const isPending = subscription.status === "pending";
+  const isRejected = subscription.status === "rejected";
   const isCancelled = subscription.status === "cancelled";
   return (
     <div className="group rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-100 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl">
@@ -90,7 +98,10 @@ export function SubscriptionCard({ subscription,onCancel }) {
         <InfoRow label="Meal Plan" value={subscription.mealPlan} />
         <InfoRow label="Price" value={subscription.price} />
         <InfoRow label="Service Area" value={subscription.serviceArea} />
-        <InfoRow label="Delivery Timings" value={subscription.deliveryTimings} />
+        <InfoRow
+          label="Delivery Timings"
+          value={subscription.deliveryTimings}
+        />
         <InfoRow label="Start Date" value={subscription.startDate} />
         <InfoRow label="Cuisine" value={subscription.cuisine} />
       </div>
@@ -104,8 +115,19 @@ export function SubscriptionCard({ subscription,onCancel }) {
 
       <div className="mt-6">
         {isActive && (
-          <button onClick={()=>onCancel(subscription.id)} className="w-full rounded-2xl bg-red-500 px-4 py-3 font-semibold text-white shadow-sm transition-all duration-300 hover:bg-red-600 hover:shadow-md">
+          <button
+            onClick={() => onCancel(subscription.id)}
+            className="w-full rounded-2xl bg-red-500 px-4 py-3 font-semibold text-white shadow-sm transition-all duration-300 hover:bg-red-600 hover:shadow-md"
+          >
             Cancel Subscription
+          </button>
+        )}
+        {isRejected && (
+          <button
+            disabled
+            className="w-full cursor-not-allowed rounded-2xl bg-red-100 px-4 py-3 font-semibold text-red-700"
+          >
+            Subscription Rejected
           </button>
         )}
 
@@ -127,7 +149,7 @@ export function SubscriptionCard({ subscription,onCancel }) {
           </button>
         )}
 
-        {!isActive && !isPending && !isCancelled && (
+        {!isActive && !isPending && !isRejected && !isCancelled && (
           <button
             disabled
             className="w-full cursor-not-allowed rounded-2xl bg-slate-100 px-4 py-3 font-semibold text-slate-500"
@@ -158,12 +180,17 @@ function EmptyState() {
       <div className="mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-orange-50">
         <span className="text-4xl">🍲</span>
       </div>
-      <h2 className="text-2xl font-bold text-slate-900">No Active Subscriptions</h2>
+      <h2 className="text-2xl font-bold text-slate-900">
+        No Active Subscriptions
+      </h2>
       <p className="mx-auto mt-3 max-w-md text-slate-500">
         You don’t have any meal subscriptions right now. Discover home cooks and
         start a fresh plan anytime.
       </p>
-      <button onClick={()=>navigate("/browse-cooks")} className="mt-8 rounded-full bg-orange-500 px-6 py-3 font-semibold text-white shadow-sm transition-all duration-300 hover:bg-orange-600 hover:shadow-md">
+      <button
+        onClick={() => navigate("/browse-cooks")}
+        className="mt-8 rounded-full bg-orange-500 px-6 py-3 font-semibold text-white shadow-sm transition-all duration-300 hover:bg-orange-600 hover:shadow-md"
+      >
         Browse Home Cooks
       </button>
     </div>
@@ -171,56 +198,89 @@ function EmptyState() {
 }
 
 export default function MySubscriptionsPage() {
-  const [subscriptions,setSubscriptions] = useState([]);
-  const [loading,setLoading] = useState(true);
+  const [subscriptions, setSubscriptions] = useState([]);
+  const [loading, setLoading] = useState(true);
   const totalSubscriptions = subscriptions.length;
   const activeSubscriptions = subscriptions.filter(
-    (s) => s.status === "active"
+    (s) => s.status === "active",
   ).length;
   const cancelledSubscriptions = subscriptions.filter(
-    (s) => s.status === "cancelled"
+    (s) => s.status === "cancelled",
   ).length;
-  const fetchSubscriptions = async()=>{
-       try{
-          const data = await getMySubscriptions();
-          const formattedSubscriptions = data.map((subscription)=>({
-            id: subscription.id,
-            cookName: subscription.name,
-            mealPlan: subscription.plan_type,
-            status: subscription.status.toLowerCase(),
-            startDate: new Date(subscription.start_date).toLocaleDateString(),
-            serviceArea: subscription.service_area,
-            deliveryTimings: subscription.delivery_timings,
-            cuisine: subscription.cuisine,
-            price: `₹${subscription.price}`,
-            cookAvatar: "https://i.pravatar.cc/150"
-        }));
-        setSubscriptions(formattedSubscriptions);
-       }catch(error){
-          console.log(error);
-       }finally{
-        setLoading(false);
-       }
-    };
-  useEffect(()=>{
-   const loadSubscriptions = async () => {
-        await fetchSubscriptions();
+  const fetchSubscriptions = async () => {
+    try {
+      const data = await getMySubscriptions();
+      const formattedSubscriptions = data.map((subscription) => ({
+        id: subscription.id,
+        cookName: subscription.name,
+        mealPlan: subscription.plan_type,
+        status: subscription.status.toLowerCase(),
+        startDate: new Date(subscription.start_date).toLocaleDateString(),
+        serviceArea: subscription.service_area,
+        deliveryTimings: subscription.delivery_timings,
+        cuisine: subscription.cuisine,
+        price: `₹${subscription.price}`,
+        cookAvatar: subscription.image_url
+          ? getImageUrl(subscription.image_url)
+          : "https://images.unsplash.com/photo-1556910103-1c02745aae4d?auto=format&fit=crop&w=300&q=80",
+      }));
+      setSubscriptions(formattedSubscriptions);
+    } catch (error) {
+      console.log(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    const loadSubscriptions = async () => {
+      await fetchSubscriptions();
     };
     loadSubscriptions();
-  },[]);
-  const handleCancelSubscription = async(id)=>{
-      try{
-        await cancelSubscription(id);
-        alert("Subscription Cancelled Successfully");
-        fetchSubscriptions();
+    const interval = setInterval(() => {
+      fetchSubscriptions();
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, []);
+  const handleCancelSubscription = async (id) => {
+    const result = await Swal.fire({
+      title: "Cancel Subscription?",
+      text: "Are you sure you want to cancel this subscription?",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#ef4444",
+      cancelButtonColor: "#6b7280",
+      confirmButtonText: "Yes, Cancel",
+      cancelButtonText: "Keep Subscription",
+      reverseButtons: true,
+    });
+
+    if (!result.isConfirmed) return;
+
+    try {
+      await cancelSubscription(id);
+
+      await Swal.fire({
+        title: "Cancelled!",
+        text: "Your subscription has been cancelled successfully.",
+        icon: "success",
+        confirmButtonColor: "#f97316",
+      });
+
+      fetchSubscriptions();
+    } catch (error) {
+      console.log(error);
+
+      Swal.fire({
+        title: "Cancellation Failed",
+        text:
+          error.response?.data?.message || "Unable to cancel the subscription.",
+        icon: "error",
+        confirmButtonColor: "#f97316",
+      });
     }
-    catch(error){
-        console.log(error);
-        alert(error.response?.data?.message);
-    }
-  }
+  };
   return (
-    
     <div className="min-h-screen bg-[#FFF9F5] px-4 py-8 text-slate-900 sm:px-6 lg:px-8">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
         <div className="flex items-center gap-3">
@@ -229,11 +289,16 @@ export default function MySubscriptionsPage() {
           </div>
           <div>
             <p className="text-lg font-semibold text-slate-900">HomeFeast</p>
-            <p className="text-xs text-slate-500">Fresh meals, delivered with care</p>
+            <p className="text-xs text-slate-500">
+              Fresh meals, delivered with care
+            </p>
           </div>
         </div>
         <nav className="hidden items-center gap-8 md:flex">
-          <Link to="/customer/dashboard" className="text-sm font-medium text-slate-600 hover:text-orange-500">
+          <Link
+            to="/customer/dashboard"
+            className="text-sm font-medium text-slate-600 hover:text-orange-500"
+          >
             Back to Dashboard
           </Link>
         </nav>
@@ -251,8 +316,14 @@ export default function MySubscriptionsPage() {
           </div>
 
           <div className="grid grid-cols-3 gap-3 rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100 sm:min-w-90">
-            <SummaryStat label="Total Subscriptions" value={totalSubscriptions} />
-            <SummaryStat label="Active Subscriptions" value={activeSubscriptions} />
+            <SummaryStat
+              label="Total Subscriptions"
+              value={totalSubscriptions}
+            />
+            <SummaryStat
+              label="Active Subscriptions"
+              value={activeSubscriptions}
+            />
             <SummaryStat
               label="Cancelled Subscriptions"
               value={cancelledSubscriptions}
